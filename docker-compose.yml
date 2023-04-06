@@ -1,5 +1,7 @@
-version: "2.4"
+version: "3.7"
+
 services:
+ 
   app:
     image: kodhive/leek
     environment:
@@ -16,19 +18,22 @@ services:
       - LEEK_ES_URL=http://es01:9200
       # Authentication
       - LEEK_API_ENABLE_AUTH=false
+      # Env
+      - CELERY_SEND_TASK_SENT_EVENT=true
+      - CELERY_DEFAULT_EXCHANGE=tasks
       # Subscriptions
       - |
         LEEK_AGENT_SUBSCRIPTIONS=
         [
           {
-            "broker": "redis://:admin@mq:6379/0",
-            "backend": null,
+            "broker": "redis://redis:6379",
+            "backend": "redis://redis:6379",
             "exchange": "celeryev",
             "queue": "leek.fanout",
             "routing_key": "#",
             "org_name": "mono",
-            "app_name": "leek",
-            "app_env": "prod",
+            "app_name": "app",
+            "app_env": "dev",
             "prefetch_count": 1000,
             "concurrency_pool_size": 2,
             "batch_max_size_in_mb": 1,
@@ -41,38 +46,46 @@ services:
       - 5000:5000
       - 8000:8000
     depends_on:
-      mq:
-        condition: service_healthy
+      - redis
+        
 
-  # Just for local demo!! (Test worker)
-  worker:
+  celery:
     build:
-      context: ./api
+      context: ./
       dockerfile: Dockerfile
     environment:
-      - BROKER_URL=redis://:admin@mq:6379/0
-    
-  # Just for local demo!! (Test client)
-  publisher:
+      broker_url: redis://redis:6379
+      result_backend: redis://redis:6379
+    volumes: 
+      - .:/code
+    command: celery -A app.celery worker -l info
+    depends_on:
+      - redis
+      #- check
+
+  check:
     build:
-      context: ./api
+      context: ./
       dockerfile: Dockerfile
+    ports: 
+      - '5001:5001'
     environment:
-      - BROKER_URL=redis://:admin@mq:6379/0
-    
-  # Just for local demo!! (Test broker)
-  mq:
+      broker_url: redis://redis:6379
+      result_backend: redis://redis:6379
+    volumes:
+      - .:/code
+    command: python app.py
+    depends_on:
+      - redis
+
+
+  redis:
     image: redis:alpine
-    command: redis-server --requirepass admin
+    #restart: always
     ports:
-      - 6379:6379
-    healthcheck:
-      test: [ "CMD", "nc", "-z", "localhost", "6379" ]
-      interval: 2s
-      timeout: 4s
-      retries: 20
+      - '6379:6379'
+    
 
-  # Just for local development!! (Test index db)
   es01:
     image: elasticsearch:7.10.1
     container_name: es01
